@@ -9,6 +9,9 @@ from .ui import H, W
 log = logging.getLogger("output")
 
 
+DRAG_PX = 15
+
+
 class Framebuffer:
     def __init__(self, dev="/dev/fb0", rotate=0):
         self.rotate = rotate == 180
@@ -55,6 +58,9 @@ class Touch:
         self._down_pos = (0, 0)
         self._pos = [0, 0]
         self._consumed = False
+        self._dragging = False
+        self._last_y = 0
+        self._dy = 0
         try:
             import evdev
         except ImportError:
@@ -103,11 +109,27 @@ class Touch:
                         self._press(ev.value == 1)
                     elif ev.type == e.EV_ABS and ev.code == e.ABS_MT_TRACKING_ID:
                         self._press(ev.value >= 0)
-                    elif ev.type == e.EV_SYN and self._down_at is not None and self._down_pos is None:
-                        self._down_pos = self._map(self._pos)
+                    elif ev.type == e.EV_SYN and self._down_at is not None:
+                        self._moved(self._map(self._pos))
             except OSError as err:
                 log.warning("touch: %s", err)
                 time.sleep(5)
+
+    def _moved(self, p):
+        with self._lock:
+            if self._down_pos is None:
+                self._down_pos, self._last_y = p, p[1]
+                return
+            if not self._dragging and abs(p[1] - self._down_pos[1]) + abs(p[0] - self._down_pos[0]) > DRAG_PX:
+                self._dragging = self._consumed = True
+            if self._dragging:
+                self._dy += p[1] - self._last_y
+            self._last_y = p[1]
+
+    def drag(self):
+        with self._lock:
+            dy, self._dy = self._dy, 0
+        return dy
 
     def _map(self, p):
         x, y = p
@@ -119,7 +141,8 @@ class Touch:
             if down and self._down_at is None:
                 self._down_at = time.monotonic()
                 self._down_pos = None
-                self._consumed = False
+                self._consumed = self._dragging = False
+                self._dy = 0
             elif not down and self._down_at is not None:
                 if not self._consumed:
                     self._taps.append(self._down_pos or self._map(self._pos))
@@ -143,11 +166,24 @@ class Touch:
 class MouseTouch:
     def __init__(self):
         self._taps, self._down_at, self._down_pos, self._consumed = [], None, (0, 0), False
+        self._dragging, self._last_y, self._dy = False, 0, 0
+
+    def drag(self):
+        dy, self._dy = self._dy, 0
+        return dy
 
     def handle(self, ev):
         import time
-        if ev.type == pygame.MOUSEBUTTONDOWN:
+        if ev.type == pygame.MOUSEMOTION and self._down_at is not None:
+            x, y = ev.pos
+            if not self._dragging and abs(y - self._down_pos[1]) + abs(x - self._down_pos[0]) > DRAG_PX:
+                self._dragging = self._consumed = True
+            if self._dragging:
+                self._dy += y - self._last_y
+            self._last_y = y
+        elif ev.type == pygame.MOUSEBUTTONDOWN:
             self._down_at, self._down_pos, self._consumed = time.monotonic(), ev.pos, False
+            self._dragging, self._last_y, self._dy = False, ev.pos[1], 0
         elif ev.type == pygame.MOUSEBUTTONUP and self._down_at is not None:
             if not self._consumed:
                 self._taps.append(ev.pos)

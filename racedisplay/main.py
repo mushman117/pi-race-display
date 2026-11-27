@@ -102,6 +102,7 @@ def main():
     rotate = max(5, int(cfg["display"]["rotate_seconds"]))
     ctx = Ctx()
     ctx.store, ctx.places, ctx.delay, ctx.alerts = store, cfg["display"]["places"], live.delay, alerts
+    ctx.scroll = screens.Scroll()
     ctx.tz = ZoneInfo(cfg["general"]["timezone"]) if cfg["general"].get("timezone") else None
     idx, switched, last_tap = 0, time.monotonic(), 0.0
     clock = pygame.time.Clock()
@@ -117,6 +118,7 @@ def main():
             if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_SPACE, pygame.K_RIGHT):
                 idx, switched = (idx + 1) % len(names), time.monotonic()
 
+        dy = touch.drag()
         held = touch.held()
         if held >= LONG_PRESS and menu is None:
             touch.consume()
@@ -133,6 +135,9 @@ def main():
                 done_key = live_key
             else:
                 idx, switched = (idx + 1) % len(names), time.monotonic()
+                ctx.scroll.reset()
+        if dy and menu is None:
+            ctx.scroll.drag(dy)
         if menu is not None and time.monotonic() - menu["since"] > 10:
             menu = None
 
@@ -172,14 +177,17 @@ def main():
             elif session and not args.demo and key != done_key:
                 screens.countdown(surf, ctx)
             else:
-                if time.monotonic() - switched >= rotate:
+                elapsed = time.monotonic() - switched
+                if elapsed >= rotate and (ctx.scroll.done or elapsed >= 120):
                     idx, switched = (idx + 1) % len(names), time.monotonic()
+                    ctx.scroll.reset()
                 screens.ROTATION[names[idx]](surf, ctx)
         except Exception:
             logging.exception("draw failed")
             ui.message(surf, "DISPLAY ERROR", "Check the log: journalctl -u racedisplay")
             idx, switched = (idx + 1) % len(names), time.monotonic()
+            ctx.scroll.reset()
         if menu is None and held > 1.0:
             screens.hold_hint(surf, (held - 1.0) / (LONG_PRESS - 1.0))
         out.present(surf)
-        clock.tick(cfg["display"]["fps"])
+        clock.tick(12 if ctx.scroll.active and not want else cfg["display"]["fps"])

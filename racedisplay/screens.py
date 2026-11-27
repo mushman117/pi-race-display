@@ -99,20 +99,90 @@ def next_track(surf, ctx):
             text(surf, ln, (box.x + 16, box.y + 50 + j * 32), 24, bold=True, maxw=box.w - 32)
 
 
+class Scroll:
+    SPEED = 45
+    PAUSE = 3
+    MANUAL = 10
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        import time
+        self.offset, self.max = 0.0, 0
+        self.t0 = self.last = time.monotonic()
+        self.manual_until = 0.0
+        self.bottom_at = None
+
+    @property
+    def active(self):
+        return self.max > 0
+
+    @property
+    def done(self):
+        import time
+        if self.max <= 0:
+            return True
+        now = time.monotonic()
+        return self.bottom_at is not None and now >= self.manual_until and now - self.bottom_at >= self.PAUSE
+
+    def update(self):
+        import time
+        now = time.monotonic()
+        step, self.last = now - self.last, now
+        if self.max <= 0 or now < self.manual_until or now - self.t0 < self.PAUSE:
+            return
+        if self.offset < self.max:
+            self.offset = min(self.max, self.offset + self.SPEED * step)
+            if self.offset >= self.max:
+                self.bottom_at = now
+
+    def drag(self, dy):
+        import time
+        self.offset = max(0.0, min(self.max, self.offset - dy))
+        self.manual_until = time.monotonic() + self.MANUAL
+        self.bottom_at = time.monotonic() if self.offset >= self.max else None
+
+
+def _scroll_list(surf, ctx, top, rh, n, draw_row):
+    view = pygame.Rect(0, top, W, H - top)
+    sc = ctx.scroll
+    sc.max = max(0, n * rh - view.h)
+    sc.update()
+    off = int(sc.offset)
+    surf.set_clip(view)
+    for i in range(n):
+        y = top + i * rh - off
+        if y + rh >= top and y < H:
+            draw_row(i, y)
+    surf.set_clip(None)
+    if sc.max:
+        track = view.h - 8
+        knob = max(30, track * view.h // (n * rh))
+        ky = top + 4 + (track - knob) * off // sc.max
+        pygame.draw.rect(surf, LINE, (W - 7, top + 4, 4, track), border_radius=2)
+        pygame.draw.rect(surf, DIM, (W - 7, ky, 4, knob), border_radius=2)
+
+
 def driver_standings(surf, ctx):
     rows = ctx.store.raw.get("drivers") or []
     header(surf, "DRIVER STANDINGS", ctx.store.raw.get("standings_round") or "")
     if not rows:
         message(surf, "NO STANDINGS YET", "Waiting for data")
         return
-    for i, d in enumerate(rows[:20]):
-        x, y = 16 + (i // 10) * 392, 56 + (i % 10) * 42
-        pygame.draw.rect(surf, PANEL, (x, y, 376, 38), border_radius=6)
-        text(surf, d["pos"], (x + 34, y + 19), 18, bold=True, anchor="midright")
-        pygame.draw.rect(surf, team_colour(d["team_id"]), (x + 44, y + 6, 5, 26))
-        text(surf, d["name"], (x + 58, y + 19), 18, anchor="midleft", maxw=190)
-        text(surf, d["points"], (x + 312, y + 19), 18, bold=True, anchor="midright")
-        arrow(surf, d["move"], (x + 334, y + 19), 14)
+
+    def row(i, y):
+        d = rows[i]
+        cy = y + 18
+        pygame.draw.rect(surf, PANEL, (16, y, W - 36, 36), border_radius=6)
+        text(surf, d["pos"], (56, cy), 18, bold=True, anchor="midright")
+        pygame.draw.rect(surf, team_colour(d["team_id"]), (68, y + 6, 5, 24))
+        text(surf, d["name"], (84, cy), 18, anchor="midleft", maxw=230)
+        text(surf, d.get("team", ""), (330, cy), 15, DIM, anchor="midleft", maxw=260)
+        text(surf, d["points"], (680, cy), 18, bold=True, anchor="midright")
+        arrow(surf, d["move"], (706, cy), 14)
+
+    _scroll_list(surf, ctx, 52, 40, len(rows), row)
 
 
 def team_standings(surf, ctx):
@@ -121,17 +191,19 @@ def team_standings(surf, ctx):
     if not rows:
         message(surf, "NO STANDINGS YET", "Waiting for data")
         return
-    rh = min(40, 418 // len(rows))
-    for i, t in enumerate(rows):
-        y = 54 + i * rh
-        pygame.draw.rect(surf, PANEL, (16, y, W - 32, rh - 4), border_radius=6)
-        cy = y + (rh - 4) // 2
+
+    def row(i, y):
+        t = rows[i]
+        cy = y + 18
+        pygame.draw.rect(surf, PANEL, (16, y, W - 36, 36), border_radius=6)
         text(surf, t["pos"], (56, cy), 20, bold=True, anchor="midright")
-        pygame.draw.rect(surf, team_colour(t["team_id"]), (68, y + 6, 6, rh - 16))
+        pygame.draw.rect(surf, team_colour(t["team_id"]), (68, y + 6, 6, 24))
         text(surf, t["name"], (86, cy), 20, anchor="midleft", maxw=420)
-        text(surf, f"{t['wins']} wins", (590, cy), 16, DIM, anchor="midright")
-        text(surf, t["points"], (700, cy), 20, bold=True, anchor="midright")
-        arrow(surf, t["move"], (726, cy), 14)
+        text(surf, f"{t['wins']} wins", (580, cy), 16, DIM, anchor="midright")
+        text(surf, t["points"], (680, cy), 20, bold=True, anchor="midright")
+        arrow(surf, t["move"], (706, cy), 14)
+
+    _scroll_list(surf, ctx, 52, 40, len(rows), row)
 
 
 def last_result(surf, ctx):
@@ -141,10 +213,12 @@ def last_result(surf, ctx):
         message(surf, "NO RESULT YET", "Waiting for data")
         return
     text(surf, f"{r['season']} {r['raceName']}".upper(), (24, 54), 22, bold=True, maxw=W - 48)
-    for i, x in enumerate(r.get("Results", [])[:10]):
-        y = 88 + i * 38
-        pygame.draw.rect(surf, PANEL, (16, y, W - 32, 34), border_radius=6)
+    res = r.get("Results", [])
+
+    def row(i, y):
+        x = res[i]
         cy = y + 17
+        pygame.draw.rect(surf, PANEL, (16, y, W - 36, 34), border_radius=6)
         d, c = x["Driver"], x.get("Constructor", {})
         text(surf, x["position"], (52, cy), 18, bold=True, anchor="midright")
         pygame.draw.rect(surf, team_colour(c.get("constructorId")), (62, y + 5, 5, 24))
@@ -157,6 +231,8 @@ def last_result(surf, ctx):
             arrow(surf, grid - pos, (666, cy), 14)
         elif grid == 0:
             text(surf, "PIT", (666, cy), 14, DIM, anchor="midleft")
+
+    _scroll_list(surf, ctx, 88, 38, len(res), row)
 
 
 def on_this_day(surf, ctx):
