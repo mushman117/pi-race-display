@@ -1,0 +1,21 @@
+[display]
+# "fb" draws straight to /dev/fb0 (recommended); "sdl" uses SDL kmsdrm
+output = "fb"
+# 0 or 180; use 180 if the picture is upside down
+rotate = 180
+# Seconds each screen shows between sessions
+rotate_seconds = 15
+# Drivers shown in live timing: 5, 10, 15 or 20
+places = 10
+fps = 5
+# Remove any you don't want; order is the rotation order
+screens = ["countdown", "next_track", "driver_standings", "team_standings", "last_result", "on_this_day"]
+
+[live]
+enabled = true
+# Seconds (0 to 120) to hold live data back so it matches your TV stream
+stream_delay = 0
+
+[general]
+# Blank uses the Pi's own time zone (set with raspi-config). Example: "Europe/London"
+timezone = ""
