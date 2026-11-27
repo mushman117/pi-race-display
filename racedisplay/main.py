@@ -1,5 +1,6 @@
 import argparse
 import datetime as dt
+import json
 import logging
 import os
 import subprocess
@@ -11,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pygame
 
 from . import output, screens, ui
-from .data import Store
+from .data import CACHE, Store
 from .livetiming import DemoTiming, LiveTiming
 from .race import Alerts
 
@@ -20,7 +21,65 @@ DEFAULTS = {
     "display": {"output": "fb", "rotate": 0, "rotate_seconds": 15, "places": 10, "fps": 5, "screens": list(screens.ROTATION)},
     "live": {"enabled": True, "stream_delay": 0},
     "general": {"timezone": ""},
+    "power": {"mode": "always", "brightness": 80, "sleep": True, "sleep_start": "23:00", "sleep_end": "07:00",
+              "wake_for_sessions": True, "auto_dim": True, "dim_percent": 50},
 }
+SETTINGS = CACHE / "settings.json"
+WAKE_SECONDS = 120
+
+
+def load_settings(cfg):
+    p = cfg["power"]
+    s = {"mode": p["mode"], "brightness": int(p["brightness"]), "sleep": bool(p["sleep"]),
+         "sleep_start": p["sleep_start"], "sleep_end": p["sleep_end"], "auto_dim": bool(p["auto_dim"])}
+    try:
+        s.update(json.loads(SETTINGS.read_text()))
+    except (OSError, ValueError):
+        pass
+    if s["mode"] not in ("always", "race_weekends"):
+        s["mode"] = "always"
+    for k in ("sleep_start", "sleep_end"):
+        if not _hm(s[k]):
+            s[k] = DEFAULTS["power"][k]
+    s["dim_percent"] = max(10, min(100, int(p["dim_percent"])))
+    return s
+
+
+def shift_time(v, minutes):
+    t = _hm(v)
+    total = (t.hour * 60 + t.minute + minutes) % 1440
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def save_settings(s):
+    try:
+        SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS.write_text(json.dumps(s))
+    except OSError as e:
+        logging.warning("settings not saved: %s", e)
+
+
+def _hm(v):
+    try:
+        h, m = str(v).split(":")
+        return dt.time(int(h), int(m))
+    except ValueError:
+        return None
+
+
+def asleep(local, start, end):
+    if not start or not end or start == end:
+        return False
+    t = local.time()
+    return start <= t < end if start < end else (t >= start or t < end)
+
+
+def race_weekend(store, now):
+    for r in store.races:
+        if r["sessions"] and r.get("date"):
+            if r["sessions"][0].start - dt.timedelta(hours=24) <= now <= r["date"] + dt.timedelta(hours=4):
+                return True
+    return False
 
 
 def load_config(path):
@@ -45,12 +104,46 @@ class Ctx:
     pass
 
 
-def menu_tap(menu, pos, surf):
-    hit = next((k for k, r in screens.MENU_BUTTONS.items()
+class types_backlight:
+    level = 100
+
+    def set_level(self, pct):
+        self.level = pct
+
+    def power(self, on):
+        pass
+
+
+def menu_tap(menu, pos, surf, ctx):
+    hit = next((k for k, r in screens.menu_buttons(menu).items()
                 if r.x <= pos[0] < r.x + r.w and r.y <= pos[1] < r.y + r.h), None)
     menu["since"] = time.monotonic()
+    if hit != "shutdown":
+        menu["confirm"] = False
     if hit == "cancel":
         return None
+    if hit in ("settings", "back"):
+        menu["page"] = "settings" if hit == "settings" else "main"
+        return menu
+    st = ctx.settings
+    if hit in ("sleep_toggle", "dim_toggle"):
+        key = "sleep" if hit == "sleep_toggle" else "auto_dim"
+        st[key] = not st[key]
+        save_settings(st)
+        return menu
+    if hit in ("start_minus", "start_plus", "end_minus", "end_plus"):
+        key = "sleep_start" if hit.startswith("start") else "sleep_end"
+        st[key] = shift_time(st[key], 30 if hit.endswith("plus") else -30)
+        save_settings(st)
+        return menu
+    if hit in ("dim", "bright"):
+        ctx.settings["brightness"] = max(10, min(100, ctx.settings["brightness"] + (10 if hit == "bright" else -10)))
+        save_settings(ctx.settings)
+        return menu
+    if hit in ("mode_always", "mode_weekend"):
+        ctx.settings["mode"] = "always" if hit == "mode_always" else "race_weekends"
+        save_settings(ctx.settings)
+        return menu
     if hit == "shutdown" and not menu.get("confirm"):
         menu["confirm"] = True
         return menu
@@ -103,6 +196,12 @@ def main():
     ctx = Ctx()
     ctx.store, ctx.places, ctx.delay, ctx.alerts = store, cfg["display"]["places"], live.delay, alerts
     ctx.scroll = screens.Scroll()
+    ctx.settings = load_settings(cfg)
+    ctx.backlight = output.Backlight() if use_fb else types_backlight()
+    ctx.backlight.set_level(ctx.settings["brightness"])
+    wake_until = bright_until = 0.0
+    dimmed = False
+    screen_on = True
     ctx.tz = ZoneInfo(cfg["general"]["timezone"]) if cfg["general"].get("timezone") else None
     idx, switched, last_tap = 0, time.monotonic(), 0.0
     clock = pygame.time.Clock()
@@ -127,8 +226,17 @@ def main():
             if time.monotonic() - last_tap < 0.4:
                 continue
             last_tap = time.monotonic()
+            if not screen_on:
+                wake_until = bright_until = time.monotonic() + WAKE_SECONDS
+                continue
+            if dimmed and menu is None:
+                bright_until = time.monotonic() + WAKE_SECONDS
+                continue
+            bright_until = time.monotonic() + WAKE_SECONDS if bright_until > time.monotonic() else bright_until
+            if time.monotonic() < wake_until:
+                wake_until = time.monotonic() + WAKE_SECONDS
             if menu is not None:
-                menu = menu_tap(menu, pos, surf)
+                menu = menu_tap(menu, pos, surf, ctx)
             elif alerts.current:
                 alerts.dismiss()
             elif finished_at is not None and live_key != done_key:
@@ -165,11 +273,39 @@ def main():
             if finished_at is not None and time.monotonic() - finished_at > HOLD_AFTER:
                 done_key = key
 
+        local = ctx.now.astimezone(ctx.tz) if ctx.tz else ctx.now.astimezone()
+        on = True
+        if ctx.settings["mode"] == "race_weekends" and not race_weekend(store, ctx.now):
+            on = False
+        if ctx.settings["sleep"] and asleep(local, _hm(ctx.settings["sleep_start"]), _hm(ctx.settings["sleep_end"])):
+            on = False
+        if cfg["power"]["wake_for_sessions"] and want and not args.demo:
+            on = True
+        if args.demo or menu is not None or time.monotonic() < wake_until:
+            on = True
+        if on != screen_on:
+            logging.info("screen %s", "on" if on else "off")
+            screen_on = on
+            ctx.backlight.power(on)
+        live_now = want and bool((live.state.get("TimingData") or {}).get("Lines"))
+        dimmed = (screen_on and ctx.settings["auto_dim"] and not live_now and menu is None
+                  and time.monotonic() >= bright_until)
+        target = ctx.settings["brightness"]
+        if dimmed:
+            target = max(10, target * ctx.settings["dim_percent"] // 100)
+        if screen_on and target != ctx.backlight.level:
+            ctx.backlight.set_level(target)
+        if not screen_on:
+            if live.running:
+                alerts.active()
+            clock.tick(2)
+            continue
+
         a = alerts.active() if want else None
         has_timing = bool((live.state.get("TimingData") or {}).get("Lines"))
         try:
             if menu is not None:
-                screens.system_menu(surf, menu)
+                screens.system_menu(surf, menu, ctx.settings)
             elif a:
                 screens.alert(surf, a)
             elif want and has_timing:

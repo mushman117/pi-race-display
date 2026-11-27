@@ -19,3 +19,19 @@ stream_delay = 0
 [general]
 # Blank uses the Pi's own time zone (set with raspi-config). Example: "Europe/London"
 timezone = ""
+
+[power]
+# "always" or "race_weekends" (24 h before first practice until 4 h after the race start).
+# The system menu can change this and brightness; menu choices are remembered.
+mode = "always"
+# Backlight level, 10 to 100
+brightness = 80
+# Screen off overnight; tap to wake for 2 minutes. The system menu can change these.
+sleep = true
+sleep_start = "23:00"
+sleep_end = "07:00"
+# Turn the screen on for live sessions even during sleep or outside race weekends
+wake_for_sessions = true
+# Dim between sessions to dim_percent of the brightness setting; tap for full brightness
+auto_dim = true
+dim_percent = 50

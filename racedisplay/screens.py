@@ -372,24 +372,83 @@ ROTATION = {"countdown": countdown, "next_track": next_track, "driver_standings"
             "team_standings": team_standings, "last_result": last_result, "on_this_day": on_this_day}
 
 
-MENU_BUTTONS = {"reboot": pygame.Rect(40, 150, 230, 180), "shutdown": pygame.Rect(285, 150, 230, 180),
-                "cancel": pygame.Rect(530, 150, 230, 180)}
+MENU_MAIN = {
+    "dim": pygame.Rect(40, 92, 110, 76), "bright": pygame.Rect(650, 92, 110, 76),
+    "settings": pygame.Rect(40, 196, 720, 76),
+    "reboot": pygame.Rect(40, 300, 230, 96), "shutdown": pygame.Rect(285, 300, 230, 96),
+    "cancel": pygame.Rect(530, 300, 230, 96),
+}
+MENU_SETTINGS = {
+    "mode_always": pygame.Rect(40, 78, 355, 60), "mode_weekend": pygame.Rect(405, 78, 355, 60),
+    "sleep_toggle": pygame.Rect(40, 178, 170, 60),
+    "start_minus": pygame.Rect(230, 178, 60, 60), "start_plus": pygame.Rect(390, 178, 60, 60),
+    "end_minus": pygame.Rect(490, 178, 60, 60), "end_plus": pygame.Rect(650, 178, 60, 60),
+    "dim_toggle": pygame.Rect(40, 280, 170, 60),
+    "back": pygame.Rect(40, 370, 720, 66),
+}
 
 
-def system_menu(surf, menu):
+def menu_buttons(menu):
+    return MENU_SETTINGS if menu.get("page") == "settings" else MENU_MAIN
+
+
+def _button(surf, rect, label, bg=PANEL, size=26, fg=TEXT):
+    pygame.draw.rect(surf, bg, rect, border_radius=14)
+    pygame.draw.rect(surf, LINE, rect, 2, border_radius=14)
+    text(surf, label, rect.center, size, fg, bold=True, anchor="center")
+
+
+def system_menu(surf, menu, settings):
     surf.fill(BG)
-    text(surf, "SYSTEM", (W // 2, 70), 40, bold=True, anchor="center")
-    labels = {"reboot": ("REBOOT", PANEL), "cancel": ("CANCEL", PANEL),
-              "shutdown": ("TAP AGAIN" if menu.get("confirm") else "SHUT DOWN",
-                           ACCENT if menu.get("confirm") else PANEL)}
-    for key, rect in MENU_BUTTONS.items():
-        label, bg = labels[key]
-        pygame.draw.rect(surf, bg, rect, border_radius=14)
-        pygame.draw.rect(surf, LINE, rect, 2, border_radius=14)
-        text(surf, label, rect.center, 28, bold=True, anchor="center")
+    if menu.get("page") == "settings":
+        _settings_page(surf, menu, settings)
+        return
+    b = MENU_MAIN
+    text(surf, "SYSTEM", (W // 2, 36), 30, bold=True, anchor="center")
+    text(surf, "BRIGHTNESS", (W // 2, 70), 15, DIM, bold=True, anchor="center")
+    _button(surf, b["dim"], "−", size=40)
+    _button(surf, b["bright"], "+", size=40)
+    bar = pygame.Rect(170, 112, 460, 36)
+    pygame.draw.rect(surf, PANEL, bar, border_radius=8)
+    lvl = settings["brightness"]
+    pygame.draw.rect(surf, ACCENT, (bar.x + 4, bar.y + 4, int((bar.w - 8) * lvl / 100), bar.h - 8), border_radius=6)
+    text(surf, f"{lvl}%", bar.center, 18, bold=True, anchor="center")
+    _button(surf, b["settings"], "SETTINGS", size=24)
+    _button(surf, b["reboot"], "REBOOT")
+    _button(surf, b["shutdown"], "TAP AGAIN" if menu.get("confirm") else "SHUT DOWN",
+            ACCENT if menu.get("confirm") else PANEL)
+    _button(surf, b["cancel"], "CLOSE")
     msg = menu.get("message") or ("Tap SHUT DOWN again to confirm" if menu.get("confirm")
                                   else "Closes automatically after 10 seconds")
-    text(surf, msg, (W // 2, 400), 20, DIM, anchor="center", maxw=W - 40)
+    text(surf, msg, (W // 2, 440), 18, DIM, anchor="center", maxw=W - 40)
+
+
+def _settings_page(surf, menu, settings):
+    b = MENU_SETTINGS
+    text(surf, "SETTINGS", (W // 2, 30), 26, bold=True, anchor="center")
+    text(surf, "DISPLAY", (40, 58), 15, DIM, bold=True)
+    weekend = settings["mode"] == "race_weekends"
+    _button(surf, b["mode_always"], "ALWAYS ON", PANEL if weekend else ACCENT, 22)
+    _button(surf, b["mode_weekend"], "RACE WEEKENDS", ACCENT if weekend else PANEL, 22)
+
+    text(surf, "SLEEP", (40, 158), 15, DIM, bold=True)
+    on = settings["sleep"]
+    _button(surf, b["sleep_toggle"], "ON" if on else "OFF", ACCENT if on else PANEL, 24)
+    col = TEXT if on else DIM
+    for key, label, centre in (("start", "FROM", 340), ("end", "TO", 600)):
+        text(surf, label, (centre, 158), 15, DIM, bold=True, anchor="midtop")
+        _button(surf, b[f"{key}_minus"], "−", size=32, fg=col)
+        _button(surf, b[f"{key}_plus"], "+", size=32, fg=col)
+        text(surf, settings[f"sleep_{key}"], (centre, 208), 26, col, bold=True, anchor="center")
+
+    text(surf, "AUTO-DIM BETWEEN SESSIONS", (40, 260), 15, DIM, bold=True)
+    dim = settings["auto_dim"]
+    _button(surf, b["dim_toggle"], "ON" if dim else "OFF", ACCENT if dim else PANEL, 24)
+    level = max(10, settings["brightness"] * settings.get("dim_percent", 50) // 100)
+    text(surf, f"Dims to {level}% between sessions; tap to brighten",
+         (230, 310), 17, TEXT if dim else DIM, anchor="midleft", maxw=W - 250)
+    _button(surf, b["back"], "BACK", size=24)
+    text(surf, "Closes automatically after 10 seconds", (W // 2, 456), 16, DIM, anchor="center")
 
 
 def hold_hint(surf, progress):

@@ -4,13 +4,7 @@ Live Formula 1 timing on a Raspberry Pi and the official 7" touchscreen. It sits
 
 Runs on a Raspberry Pi 2 with 1 GB of RAM, so any later model works too.
 
-![Live Timing Screen](docs/livetiming.jpeg)
-![Driver Standings Screen](docs/driverstanding.jpeg)
-![Team Standings Screen](docs/teamstanding.jpeg)
-![Last Race Screen](docs/lastrace.jpeg)
-![Next Session Screen](docs/nextsession.jpeg)
-![Next Track Screen](docs/nexttrack.jpeg)
-![On This Day Screen](docs/onthisday.jpeg)
+![Pi Race Display on the official 7" screen](docs/photo.jpg)
 
 ## Features
 
@@ -33,7 +27,14 @@ Runs on a Raspberry Pi 2 with 1 GB of RAM, so any later model works too.
 - Last race result, with places gained from the grid
 - On this day: a win, first win or driver birthday from Formula 1 history, new every day
 
-Tap the screen to skip to the next screen or dismiss an alert. Hold anywhere for 3 seconds to open the system menu with Reboot and Shut down; shutting down asks for a second tap to confirm.
+Tap the screen to skip to the next screen or dismiss an alert. Hold anywhere for 3 seconds to open the system menu: brightness, Reboot and Shut down (shutting down asks for a second tap to confirm). Its Settings page has the display mode, the sleep toggle and times, and auto-dim.
+
+**Power and schedule**
+- Brightness from 10% to 100%, set from the system menu and remembered across reboots
+- Auto-dim between sessions to 50% of the brightness setting; tap for full brightness for 2 minutes
+- Sleep schedule: the backlight turns off overnight (23:00 to 07:00 by default, adjustable in 30-minute steps from the menu); tap to wake for 2 minutes
+- Display mode: always on, or only during race weekends (24 hours before first practice until 4 hours after the race start)
+- Live sessions wake the screen, even overnight or outside race weekends
 
 ## Hardware
 
@@ -67,7 +68,7 @@ cd pi-race-display
 sudo reboot
 ```
 
-The installer adds the system packages, puts your user in the `video`, `render` and `input` groups, allows your user to run only `systemctl reboot` and `systemctl poweroff` without a password (for the system menu), and installs a systemd service that starts on boot.
+The installer adds the system packages, puts your user in the `video`, `render` and `input` groups, allows your user to run only `systemctl reboot` and `systemctl poweroff` without a password (for the system menu), adds a udev rule so the app can set the backlight, and installs a systemd service that starts on boot.
 
 After the reboot you see the starting lights, then the screens. On first run the app downloads Formula 1 race history in the background, which takes about 10 minutes because of the API's rate limit.
 
@@ -92,7 +93,7 @@ Run `./install.sh` again if a release notes a change to packages or the service 
 
 ## Configuration
 
-Edit `config.toml`, then run `sudo systemctl restart racedisplay`.
+Edit `config.toml`, then run `sudo systemctl restart racedisplay`. Settings in the `[display]`, `[live]` and `[general]` sections apply as shown; the `[power]` section sets starting values, and later changes made in the system menu are saved in `~/.cache/racedisplay/settings.json`.
 
 | Setting | Values | Purpose |
 |---|---|---|
@@ -103,6 +104,13 @@ Edit `config.toml`, then run `sudo systemctl restart racedisplay`.
 | `places` | `5`, `10`, `15`, `20` | Drivers shown in live timing |
 | `fps` | 1 to 10 | Redraw rate; 5 suits a Pi 2 |
 | `screens` | list | Which between-session screens show, in order |
+| `mode` | `always`, `race_weekends` | When the screen is on; the system menu overrides this |
+| `brightness` | 10 to 100 | Starting backlight level; the system menu overrides this |
+| `sleep` | `true`, `false` | Overnight screen-off on or off |
+| `sleep_start`, `sleep_end` | `HH:MM` | Overnight screen-off period |
+| `auto_dim` | `true`, `false` | Dim when no session is live |
+| `dim_percent` | 10 to 100 | Dimmed level as a percentage of `brightness` |
+| `wake_for_sessions` | `true`, `false` | Turn the screen on for live sessions during sleep or outside race weekends |
 | `enabled` | `true`, `false` | Turns live timing on or off |
 | `stream_delay` | 0 to 120 | Seconds to hold live data back to match your stream |
 | `timezone` | e.g. `Europe/London` | Blank uses the Pi's time zone (`sudo raspi-config`) |
@@ -162,6 +170,7 @@ View the log with `journalctl -u racedisplay -f`.
 | Screen goes blank after 10 minutes | Console blanking; check `screen-setup.sh` ran (the log shows an error if not) |
 | Lightning bolt or undervoltage warnings | Run `vcgencmd get_throttled`; anything other than `0x0` means the supply or cable is too weak |
 | `429 Too Many Requests` from Jolpica | Rate limit during the history download; the app waits and retries |
+| Brightness buttons do nothing | Log shows `backlight not writable`; run `./install.sh` again and reboot |
 | Menu shows "Not permitted" | The sudoers rule is missing; run `./install.sh` again |
 | `F1 refused access (401)` | F1 has restricted the live feed; see Data sources and limits |
 | "Waiting for live timing" during a session | Feed unreachable; check WiFi with `nmcli device` and the log |

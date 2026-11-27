@@ -199,3 +199,47 @@ class MouseTouch:
     def taps(self):
         t, self._taps = self._taps, []
         return t
+
+
+class Backlight:
+    def __init__(self):
+        import glob
+        devs = sorted(glob.glob("/sys/class/backlight/*"))
+        self.path = devs[0] if devs else None
+        self.on, self.level, self._warned = True, 100, False
+        self.max = 255
+        if self.path:
+            try:
+                self.max = int(open(f"{self.path}/max_brightness").read())
+            except (OSError, ValueError):
+                pass
+            log.info("backlight %s (max %d)", self.path, self.max)
+        else:
+            log.info("no backlight control found")
+
+    def _write(self, name, value):
+        if not self.path:
+            return
+        try:
+            with open(f"{self.path}/{name}", "w") as f:
+                f.write(str(value))
+        except OSError as e:
+            if not self._warned and name == "brightness":
+                log.warning("backlight not writable (%s): run ./install.sh again", e)
+                self._warned = True
+
+    def set_level(self, pct):
+        self.level = max(10, min(100, int(pct)))
+        if self.on:
+            self._write("brightness", max(1, round(self.max * self.level / 100)))
+
+    def power(self, on):
+        if on == self.on:
+            return
+        self.on = on
+        if on:
+            self._write("bl_power", 0)
+            self.set_level(self.level)
+        else:
+            self._write("brightness", 0)
+            self._write("bl_power", 4)

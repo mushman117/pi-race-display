@@ -16,6 +16,11 @@ echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/system
 sudo chmod 440 /etc/sudoers.d/racedisplay
 sudo visudo -cf /etc/sudoers.d/racedisplay
 
+echo 'SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"' \
+  | sudo tee /etc/udev/rules.d/99-racedisplay-backlight.rules >/dev/null
+sudo udevadm control --reload
+sudo udevadm trigger --subsystem-match=backlight --action=add
+
 sed "s|__APP_DIR__|$APP_DIR|g; s|__USER__|$USER_NAME|g" "$APP_DIR/racedisplay.service" \
   | sudo tee /etc/systemd/system/racedisplay.service >/dev/null
 sudo systemctl daemon-reload
