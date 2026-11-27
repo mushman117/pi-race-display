@@ -4,7 +4,7 @@ Live Formula 1 timing on a Raspberry Pi and the official 7" touchscreen. It sits
 
 Runs on a Raspberry Pi 2 with 1 GB of RAM, so any later model works too.
 
-![Pi Race Display on the official 7" screen](docs/photo.jpg)
+![Pi Race Display on the official 7" screen](docs/timing.jpeg)
 
 ## Features
 
