@@ -47,9 +47,14 @@ class SDLOutput:
 
 
 class Touch:
-    def __init__(self):
-        self._taps = 0
+    def __init__(self, rotate=0):
+        self.rotate = rotate == 180
         self._lock = threading.Lock()
+        self._taps = []
+        self._down_at = None
+        self._down_pos = (0, 0)
+        self._pos = [0, 0]
+        self._consumed = False
         try:
             import evdev
         except ImportError:
@@ -66,29 +71,95 @@ class Touch:
             abs_codes = [c[0] if isinstance(c, tuple) else c for c in caps.get(e.EV_ABS, [])]
             if e.BTN_TOUCH in caps.get(e.EV_KEY, []) or e.ABS_MT_TRACKING_ID in abs_codes:
                 log.info("touch device: %s", d.name)
-                return d
-        return None
+                return d, abs_codes
+        return None, []
+
+    def _scale(self, d, code, size):
+        try:
+            info = d.absinfo(code)
+            span = max(1, info.max - info.min)
+            return lambda v: int((v - info.min) * (size - 1) / span)
+        except OSError:
+            return lambda v: v
 
     def _run(self):
         import time
         e = self.evdev.ecodes
         while True:
             try:
-                d = self._find()
+                d, codes = self._find()
                 if not d:
                     time.sleep(10)
                     continue
+                xc = e.ABS_MT_POSITION_X if e.ABS_MT_POSITION_X in codes else e.ABS_X
+                yc = e.ABS_MT_POSITION_Y if e.ABS_MT_POSITION_Y in codes else e.ABS_Y
+                sx, sy = self._scale(d, xc, W), self._scale(d, yc, H)
                 for ev in d.read_loop():
-                    down = (ev.type == e.EV_KEY and ev.code == e.BTN_TOUCH and ev.value == 1) or \
-                           (ev.type == e.EV_ABS and ev.code == e.ABS_MT_TRACKING_ID and ev.value >= 0)
-                    if down:
-                        with self._lock:
-                            self._taps += 1
+                    if ev.type == e.EV_ABS and ev.code in (xc, e.ABS_X):
+                        self._pos[0] = sx(ev.value)
+                    elif ev.type == e.EV_ABS and ev.code in (yc, e.ABS_Y):
+                        self._pos[1] = sy(ev.value)
+                    elif ev.type == e.EV_KEY and ev.code == e.BTN_TOUCH:
+                        self._press(ev.value == 1)
+                    elif ev.type == e.EV_ABS and ev.code == e.ABS_MT_TRACKING_ID:
+                        self._press(ev.value >= 0)
+                    elif ev.type == e.EV_SYN and self._down_at is not None and self._down_pos is None:
+                        self._down_pos = self._map(self._pos)
             except OSError as err:
                 log.warning("touch: %s", err)
                 time.sleep(5)
 
-    def tapped(self):
+    def _map(self, p):
+        x, y = p
+        return (W - 1 - x, H - 1 - y) if self.rotate else (x, y)
+
+    def _press(self, down):
+        import time
         with self._lock:
-            n, self._taps = self._taps, 0
-        return n > 0
+            if down and self._down_at is None:
+                self._down_at = time.monotonic()
+                self._down_pos = None
+                self._consumed = False
+            elif not down and self._down_at is not None:
+                if not self._consumed:
+                    self._taps.append(self._down_pos or self._map(self._pos))
+                self._down_at = None
+
+    def held(self):
+        import time
+        with self._lock:
+            return 0.0 if self._down_at is None or self._consumed else time.monotonic() - self._down_at
+
+    def consume(self):
+        with self._lock:
+            self._consumed = True
+
+    def taps(self):
+        with self._lock:
+            t, self._taps = self._taps, []
+        return t
+
+
+class MouseTouch:
+    def __init__(self):
+        self._taps, self._down_at, self._down_pos, self._consumed = [], None, (0, 0), False
+
+    def handle(self, ev):
+        import time
+        if ev.type == pygame.MOUSEBUTTONDOWN:
+            self._down_at, self._down_pos, self._consumed = time.monotonic(), ev.pos, False
+        elif ev.type == pygame.MOUSEBUTTONUP and self._down_at is not None:
+            if not self._consumed:
+                self._taps.append(ev.pos)
+            self._down_at = None
+
+    def held(self):
+        import time
+        return 0.0 if self._down_at is None or self._consumed else time.monotonic() - self._down_at
+
+    def consume(self):
+        self._consumed = True
+
+    def taps(self):
+        t, self._taps = self._taps, []
+        return t

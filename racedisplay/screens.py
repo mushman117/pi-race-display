@@ -294,3 +294,33 @@ def alert(surf, a):
 
 ROTATION = {"countdown": countdown, "next_track": next_track, "driver_standings": driver_standings,
             "team_standings": team_standings, "last_result": last_result, "on_this_day": on_this_day}
+
+
+MENU_BUTTONS = {"reboot": pygame.Rect(40, 150, 230, 180), "shutdown": pygame.Rect(285, 150, 230, 180),
+                "cancel": pygame.Rect(530, 150, 230, 180)}
+
+
+def system_menu(surf, menu):
+    surf.fill(BG)
+    text(surf, "SYSTEM", (W // 2, 70), 40, bold=True, anchor="center")
+    labels = {"reboot": ("REBOOT", PANEL), "cancel": ("CANCEL", PANEL),
+              "shutdown": ("TAP AGAIN" if menu.get("confirm") else "SHUT DOWN",
+                           ACCENT if menu.get("confirm") else PANEL)}
+    for key, rect in MENU_BUTTONS.items():
+        label, bg = labels[key]
+        pygame.draw.rect(surf, bg, rect, border_radius=14)
+        pygame.draw.rect(surf, LINE, rect, 2, border_radius=14)
+        text(surf, label, rect.center, 28, bold=True, anchor="center")
+    msg = menu.get("message") or ("Tap SHUT DOWN again to confirm" if menu.get("confirm")
+                                  else "Closes automatically after 10 seconds")
+    text(surf, msg, (W // 2, 400), 20, DIM, anchor="center", maxw=W - 40)
+
+
+def hold_hint(surf, progress):
+    pygame.draw.rect(surf, PANEL, (200, H - 60, 400, 40), border_radius=8)
+    pygame.draw.rect(surf, ACCENT, (204, H - 56, int(392 * min(1, progress)), 32), border_radius=6)
+    text(surf, "Keep holding for system menu", (W // 2, H - 40), 16, bold=True, anchor="center")
+
+
+def power_message(surf, title, sub):
+    message(surf, title, sub)

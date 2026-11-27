@@ -4,7 +4,7 @@ Live Formula 1 timing on a Raspberry Pi and the official 7" touchscreen. It sits
 
 Runs on a Raspberry Pi 2 with 1 GB of RAM, so any later model works too.
 
-![Pi Race Display on the official 7" screen](docs/timing.jpeg)
+![Pi Race Display on the official 7" screen](docs/photo.jpg)
 
 ## Features
 
@@ -27,7 +27,7 @@ Runs on a Raspberry Pi 2 with 1 GB of RAM, so any later model works too.
 - Last race result, with places gained from the grid
 - On this day: a win, first win or driver birthday from Formula 1 history, new every day
 
-Tap the screen to skip to the next screen or dismiss an alert.
+Tap the screen to skip to the next screen or dismiss an alert. Hold anywhere for 3 seconds to open the system menu with Reboot and Shut down; shutting down asks for a second tap to confirm.
 
 ## Hardware
 
@@ -61,7 +61,7 @@ cd pi-race-display
 sudo reboot
 ```
 
-The installer adds the system packages, puts your user in the `video`, `render` and `input` groups, and installs a systemd service that starts on boot.
+The installer adds the system packages, puts your user in the `video`, `render` and `input` groups, allows your user to run only `systemctl reboot` and `systemctl poweroff` without a password (for the system menu), and installs a systemd service that starts on boot.
 
 After the reboot you see the starting lights, then the screens. On first run the app downloads Formula 1 race history in the background, which takes about 10 minutes because of the API's rate limit.
 
@@ -92,6 +92,7 @@ Edit `config.toml`, then run `sudo systemctl restart racedisplay`.
 |---|---|---|
 | `output` | `fb`, `sdl` | `fb` writes straight to `/dev/fb0` (default); `sdl` uses SDL's kmsdrm driver |
 | `rotate` | `0`, `180` | Flips the picture if the screen is mounted upside down |
+| `touch_rotate` | `0`, `180` | Optional; set only if menu buttons respond in the wrong place. Defaults to `rotate` |
 | `rotate_seconds` | 5 or more | Seconds each screen shows between sessions |
 | `places` | `5`, `10`, `15`, `20` | Drivers shown in live timing |
 | `fps` | 1 to 10 | Redraw rate; 5 suits a Pi 2 |
@@ -105,7 +106,7 @@ Edit `config.toml`, then run `sudo systemctl restart racedisplay`.
 The app is a single Python process with three background threads and a 5 fps drawing loop.
 
 - **Schedule and statistics** (`data.py`) poll the Jolpica API every 30 minutes for the calendar, standings, last result and next-track facts, and Open-Meteo for the forecast. Results are cached in `~/.cache/racedisplay`, so the screens work after a reboot without a connection.
-- **Live timing** (`livetiming.py`) connects to F1's SignalR Core feed from 10 minutes before each session until 20 minutes after its scheduled end. Updates are merged into one state tree and held in a queue for the configured stream delay.
+- **Live timing** (`livetiming.py`) connects to F1's SignalR Core feed from 10 minutes before each session. When F1 reports the session finished, the final order stays up for 15 minutes (tap to skip), then the screens rotate again. If no finish is reported, it stops 20 minutes after the scheduled end. Updates are merged into one state tree and held in a queue for the configured stream delay.
 - **Race logic** (`race.py`) turns that state into table rows and detects overtakes, battles, flag changes and race control events.
 - **Screens** (`screens.py`, `ui.py`) draw with pygame on an off-screen surface.
 - **Output** (`output.py`) writes each frame to the framebuffer, converting to 16-bit colour where needed, and reads taps from the touchscreen through evdev.
@@ -155,6 +156,7 @@ View the log with `journalctl -u racedisplay -f`.
 | Screen goes blank after 10 minutes | Console blanking; check `screen-setup.sh` ran (the log shows an error if not) |
 | Lightning bolt or undervoltage warnings | Run `vcgencmd get_throttled`; anything other than `0x0` means the supply or cable is too weak |
 | `429 Too Many Requests` from Jolpica | Rate limit during the history download; the app waits and retries |
+| Menu shows "Not permitted" | The sudoers rule is missing; run `./install.sh` again |
 | `F1 refused access (401)` | F1 has restricted the live feed; see Data sources and limits |
 | "Waiting for live timing" during a session | Feed unreachable; check WiFi with `nmcli device` and the log |
 | Wrong session times | Set the Pi's time zone or `timezone` in `config.toml` |
@@ -162,10 +164,6 @@ View the log with `journalctl -u racedisplay -f`.
 ## Disclaimer
 
 This is an unofficial project. It is not associated with Formula 1 companies. F1, FORMULA ONE, FORMULA 1, FIA FORMULA ONE WORLD CHAMPIONSHIP, GRAND PRIX and related marks are trademarks of Formula One Licensing B.V.
-
-## How this was built
-
-The code was written by Claude (Anthropic's AI assistant) in conversation with me. I tested it on my own hardware and reported each fault back. It has run on one setup: a Pi 2, the official 7" screen and a TP-Link AR5523 dongle. The alerts have only been tested against a simulated race and a few live sessions, so expect rough edges.
 
 ## Licence
 

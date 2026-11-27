@@ -11,6 +11,11 @@ for g in video render input; do
   getent group "$g" >/dev/null && sudo usermod -aG "$g" "$USER_NAME"
 done
 
+echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff" \
+  | sudo tee /etc/sudoers.d/racedisplay >/dev/null
+sudo chmod 440 /etc/sudoers.d/racedisplay
+sudo visudo -cf /etc/sudoers.d/racedisplay
+
 sed "s|__APP_DIR__|$APP_DIR|g; s|__USER__|$USER_NAME|g" "$APP_DIR/racedisplay.service" \
   | sudo tee /etc/systemd/system/racedisplay.service >/dev/null
 sudo systemctl daemon-reload
